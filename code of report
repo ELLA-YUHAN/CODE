@@ -1,16 +1,42 @@
-#plot a density graph
 # Libraries
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("limma")
+library(limma)
+#the cpm function from the edgeR library
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("edgeR")
+library(edgeR)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("Glimma")
+library(Glimma)
+install.packages("gplots")
+library(gplots)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
+install.packages("RColorBrewer")
+library(RColorBrewer)
 install.packages("ggplot2")
 library(ggplot2)
-install.packages("hrbrthemes")
-library(hrbrthemes)
 install.packages("dplyr")
 library(dplyr)
 install.packages("tidyr")
 library(tidyr)
-install.packages("viridis")
-library(viridis)
+install.packages("devtools")
+library(devtools)
+install.packages("beam")
+library(beam)
+install.packages("igraph")
+library(igraph)
+install.packages("UpSetR")
+library(UpSetR)
 
+
+##plot a density graph##
 # read the data into R
 seqdata <- read.delim("Bladder_RNA-seq_STAR_count_data_NextSeq_Samp_only.txt", stringsAsFactors = FALSE)
 
@@ -33,6 +59,8 @@ myCPM <- as.data.frame(myCPM)
 head(myCPM)
 #concatenate all samples into one column
 myCPM<-pivot_longer(myCPM, starts_with("B"))
+#set CPM value greater than 5 in order to reduce the scope of visualization
+myCPM<-subset(myCPM, value>5)
 View(myCPM)
 
 #create a density plot
@@ -42,3 +70,548 @@ p1=ggplot(data = myCPM, aes(x = value, y = name, fill=name), lwd=0.5) +
 p1
 ggsave(filename="sample.pdf", plot=p1,
        height=50, width=30, units="cm")  
+
+
+
+##calculate the genes left under each cut-off after filtering##
+# read the data into R
+seqdata <- read.delim("Bladder_RNA-seq_STAR_count_data_NextSeq_Samp_only.txt", stringsAsFactors = FALSE)
+#Format the data
+countdata <- seqdata[,-1]
+rownames(countdata) <- seqdata[,1]
+#use the cpm function from the edgeR library
+keep <- rowSums(cpm(countdata)>0.1) #0.1 is a threshold and it can be replaced by 0.2, 0.25, 0.3, 0.5, 1, 2 and 5
+d <- countdata[keep,]
+dim(d)
+
+
+
+##calculate the left genes for each sample under each cut-off##
+# read the data into R
+seqdata <- read.delim("Bladder_RNA-seq_STAR_count_data_NextSeq_Samp_only.txt", stringsAsFactors = FALSE)
+#Format the data
+countdata <- seqdata[,-1]
+rownames(countdata) <- seqdata[,1]
+
+#0.1 is a threshold and it can be replaced by 0.2, 0.25, 0.3, 0.5, 1, 2 and 5
+#[,1] represent the first sample. There are 58 samples, so 1 can be replaced by any number from 1 to 58
+keep <- rowSums(cpm(countdata[,1])>0.1)
+d <- countdata[keep,]
+dim(d)
+
+
+
+
+##create network graphs at each cutoff##
+library(igraph)
+library(beam)
+#loop for creating network graphs at each cutoff
+cutoffs<-c(0, 0.1, 0.2, 0.25, 0.3, 0.5, 1, 2, 5)
+for (cut in cutoffs) {
+  seqdata <- read.table("Bladder_RNA-seq_STAR_count_data_NextSeq_Samp_only.txt", header=TRUE, sep="	", row.names=1)
+  countdata <- seqdata
+  
+  #prepare the Gaussian graphical model (GGM)
+  #set everything below cut-off (as 0.1) to zero
+  #remove all genes that have only '0' left avoid disturbing the GGM
+  countdata[cpm(countdata)<=cut]=0
+  data<-countdata[which(rowSums(countdata==0)==0),]
+  #save as file and the file names are "cut_data.csv" and the cut are 0, 0.1, 0.2, 0.25, 0.3, 0.5, 1, 2 and 5
+  filename=paste(sep="", cut, "_", "data.csv")
+  write.csv(x = data,file = filename)
+  
+  data<-read.table(filename, header=T, sep=",", row.names=1)
+  # perform GGM in beam package
+  matrix<-lightbeam(t(as.matrix(data)), thres = 0.1, method = "holm", verbose=TRUE)
+  #create the network at each cutoff
+  net=graph_from_adjacency_matrix(matrix, diag=FALSE, weighted=TRUE)
+  #save as file and the file names are "cut_data_network.graphml" and the cut are 0, 0.1, 0.2, 0.25, 0.3, 0.5, 1, 2 and 5
+  filename=paste(sep="", cut, "_", "data_network.graphml")
+  write_graph(net,'filename.graphml', 'graphml')
+}
+
+
+
+
+##loop for counting the number of edges and vertices of networks##
+library(limma)
+library(edgeR)
+library(igraph)
+library(beam)
+cutoffs<-c(0, 0.1, 0.2, 0.25, 0.3, 0.5, 1, 2, 5)
+for (cut in cutoffs) {
+  filename=paste(sep="", cut, "_", "data.csv")
+  data<-read.table(filename, header=T, sep=",", row.names=1)
+  matrix<-lightbeam(t(as.matrix(data)), thres = 0.1, method = "holm", verbose=TRUE)
+  net=graph_from_adjacency_matrix(matrix, diag=FALSE, weighted=TRUE)
+  #gsize() counts the number of edges
+  print(gsize(net))
+  #gorder() counts the number of vertices
+  print(gorder(net))
+}
+
+
+
+##return lists of edges of networks##
+library(limma)
+library(edgeR)
+library(igraph)
+library(beam)
+cutoffs<-c(0, 0.1, 0.2, 0.25, 0.3, 0.5, 1, 2, 5)
+for (cut in cutoffs) {
+  seqdata <- read.table("Bladder_RNA-seq_STAR_count_data_NextSeq_Samp_only.txt", header=TRUE, sep="	", row.names=1)
+  countdata <- seqdata
+  countdata[cpm(countdata)<=cut]=0
+  data<-countdata[which(rowSums(countdata==0)==0),]
+  data<-cpm(data)
+  filename=paste(sep="", cut, "_", "data.csv")
+  write.csv(x = data,file = filename)
+  
+  data2<-read.table(filename, header=T, sep=",", row.names=1)
+  matrix<-lightbeam(t(as.matrix(data2)), thres = 0.1, method = "holm", verbose=TRUE)
+  net=graph_from_adjacency_matrix(matrix, diag=FALSE, weighted=TRUE)
+  
+  #as_edgelist() returns the lists of edges
+  edgelist<- as_edgelist(net, names = TRUE)
+  filename2=paste(sep="", "edgelist_",cut, ".csv")
+  write.table(file=filename2, edgelist)
+}
+
+
+
+
+
+##return lists of edges of networks##
+library(beam)
+library(limma)
+library(edgeR)
+cutoffs<-c(0, 0.1, 0.2, 0.25, 0.3, 0.5, 1, 2, 5)
+for (cut in cutoffs) {
+  seqdata <- read.table("Bladder_RNA-seq_STAR_count_data_NextSeq_Samp_only.txt", header=TRUE, sep="	", row.names=1)
+  countdata <- seqdata
+  countdata[cpm(countdata)<=cut]=0
+  data<-countdata[which(rowSums(countdata==0)==0),]
+  data<-cpm(data)
+  filename=paste(sep="", cut, "_", "data.csv")
+  write.csv(x = data,file = filename)
+  
+  data2<-read.table(filename, header=T, sep=",", row.names=1)
+  matrix<-lightbeam(t(as.matrix(data2)), thres = 0.1, method = "holm", verbose=TRUE)
+  net=graph_from_adjacency_matrix(matrix, diag=FALSE, weighted=TRUE)
+  
+  #get.vertex.attribut() returns the lists of nodes 
+  node<-get.vertex.attribute (net, names = TRUE)
+  filename2=paste(sep="", "node_",cut, ".csv")
+  write.table(file=filename2, node)
+}
+
+
+
+
+##plot UpSet graphs for the intersection##
+#loop for performing intersection on all cut-offs and no-cutoff in the aspect of edges#
+library(UpSetR)
+library(beam)
+library(limma)
+library(edgeR)
+cutoffs<-c(0.1, 0.2, 0.25, 0.3, 0.5, 1, 2, 5)
+for (cut in cutoffs) {
+  #Read network data into R
+  filename=paste(sep="", cut, "_", "data_network.graphml")
+  net<-read.graph(filename, format = "graphml")
+  edgelist<- as_edgelist(net, names = TRUE)
+  filename2=paste(sep="", "edgelist_",cut, ".csv")
+  write.table(file=filename2, edgelist)
+  
+  df1<-read.table('edgelist_0.csv', header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+  df2<-read.table(filename2, header=T, sep=" ", row.names=1,  stringsAsFactors=FALSE)
+  m1<-as.data.frame(t(apply(as.matrix(df1),1,sort)), stringsAsFactors=FALSE)
+  m2<-as.data.frame(t(apply(as.matrix(df2),1,sort)), stringsAsFactors=FALSE)
+  
+  a=length(m1[,1])
+  b=length(m2[,1])
+  #intersect() returns the same edges
+  intersection<-intersect(m1, m2) 
+  #length function shows the number of the same genes
+  c=length(intersection[,1])
+  
+  #the number of edges at 0 cut-off
+  print(a)
+  #the number of edges at other cut-offs
+  print(b)
+  #the size of intersection
+  print(c)
+}
+
+input <- c(
+  #the number of genes at each cut-off
+  "0-cutoff"=44505,
+  "0.1-cutoff"=32885,
+  "0.2-cutoff"=26303,
+  "0.25-cutoff"=24548,
+  "0.3-cutoff"=23061,
+  "0.5-cutoff"=19151,
+  "1-cutoff"=14776,
+  "2-cutoff"=11003,
+  "5-cutoff"=7343,
+  #the intersection between two networks
+  "0-cutoff&0.1-cutoff"=32074,
+  "0-cutoff&0.2-cutoff"=25285,
+  "0-cutoff&0.25-cutoff"=23456,
+  "0-cutoff&0.3-cutoff"=21909,
+  "0-cutoff&0.5-cutoff"=17968,
+  "0-cutoff&1-cutoff"=13641,
+  "0-cutoff&2-cutoff"=10044,
+  "0-cutoff&5-cutoff"=6535,
+  "0.1-cutoff&0.2-cutoff"=25827
+)
+#create an upset graph
+data <- fromExpression(input)
+upset(data)
+
+
+
+
+##plot UpSet graphs for the difference between all cut-offs and no-cutoff in the aspect of edges##
+#An undirected edge does not have any direction
+#Therefore, there are two conditions whencollecting list of edges. One is 'novel' which means those edges only at higher cut-off, the other is 'loss’ representing the ones only at lower cut-off. 
+#Firstly, calculating the number of different edges only at lower cut-off
+#setdiff function returns difference between the two collections
+#length function shows the number of different genes
+length(setdiff (m0,m0.1)[,1])
+length(setdiff (m0.1,m0.2) [,1])
+length(setdiff (m0.2,m0.25) [,1])
+length(setdiff (m0.25,m0.3) [,1])
+length(setdiff (m0.3,m0.5) [,1])
+length(setdiff (m0.5,m1) [,1])
+length(setdiff (m1,m2) [,1])
+length(setdiff (m2,m5) [,1])
+
+input <- c(
+  "0-cutoff"=44505,
+  "0.1-cutoff"=32885, 
+  "0.2-cutoff"=26303,
+  "0.25-cutoff"=24548,
+  "0.3-cutoff"=23061,
+  "0.5-cutoff"=19151,
+  "1-cutoff"=14776,
+  "2-cutoff"=11003,
+  "5-cutoff"=7343,
+  #the difference between two networks
+  "0-cutoff&0.1-cutoff"=12431, 
+  "0.1-cutoff&0.2-cutoff"=7058, 
+  "0.2-cutoff&0.25-cutoff"=2020,
+  "0.25-cutoff&0.3-cutoff"=1691,
+  "0.3-cutoff&0.5-cutoff"=4272,
+  "0.5-cutoff&1-cutoff"=4861,
+  "1-cutoff&2-cutoff"=4146,
+  "2-cutoff&5-cutoff"=4063
+)
+#create an upset graph
+data <- fromExpression(input)
+upset(data, nsets = 9,mainbar.y.label = "Set and 'Loss' Sizes")
+
+
+#Then calculating the number of different edges only at lower cut-off
+length(setdiff (m0.1,m0))
+length(setdiff (m0.2,m0.1))
+length(setdiff (m0.25,m0.2))
+length(setdiff (m0.3,m0.25))
+length(setdiff (m0.5,m0.3))
+length(setdiff (m1,m0.5))
+length(setdiff (m2,m1))
+length(setdiff (m5,m2))
+input <- c(
+  "0-cutoff"=44505,
+  "0.1-cutoff"=32885, 
+  "0.2-cutoff"=26303,
+  "0.25-cutoff"=24548,
+  "0.3-cutoff"=23061,
+  "0.5-cutoff"=19151,
+  "1-cutoff"=14776,
+  "2-cutoff"=11003,
+  "5-cutoff"=7343,
+  #the difference between two networks
+  "0.1-cutoff&0-cutoff"=811, 
+  "0.2-cutoff&0.1-cutoff"=476, 
+  "0.25-cutoff&0.2-cutoff"=265,
+  "0.3-cutoff&0.25-cutoff"=204,
+  "0.5-cutoff&0.3-cutoff"=362,
+  "1-cutoff&0.5-cutoff"=486,
+  "2-cutoff&1-cutoff"=373,
+  "5-cutoff&2-cutoff"=403
+)
+#create an upset graph
+data <- fromExpression(input)
+upset(data, nsets = 9, mainbar.y.label = "Set and 'Novel' Sizes")
+
+
+
+
+##plot UpSet graphs for the intersection between all cut-offs and no-cutoff in the aspect of nodes##
+library(UpSetR)
+df0<-read.table('node_0.csv', header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+m0<-as.data.frame(t(apply(as.matrix(df0),1,sort)), stringsAsFactors=FALSE)
+m0<-m0[,-2]
+df0.1<-read.table('node_0.1.csv', header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+m0.1<-as.data.frame(t(apply(as.matrix(df0.1),1,sort)), stringsAsFactors=FALSE)
+m0.1<-m0.1[,-2]
+df0.2<-read.table('node_0.2.csv', header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+m0.2<-as.data.frame(t(apply(as.matrix(df0.2),1,sort)), stringsAsFactors=FALSE)
+m0.2<-m0.2[,-2]
+df0.25<-read.table('node_0.25.csv', header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+m0.25<-as.data.frame(t(apply(as.matrix(df0.25),1,sort)), stringsAsFactors=FALSE)
+m0.25<-m0.25[,-2]
+df0.3<-read.table('node_0.3.csv', header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+m0.3<-as.data.frame(t(apply(as.matrix(df0.3),1,sort)), stringsAsFactors=FALSE)
+m0.3<-m0.3[,-2]
+df0.5<-read.table('node_0.5.csv', header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+m0.5<-as.data.frame(t(apply(as.matrix(df0.5),1,sort)), stringsAsFactors=FALSE)
+m0.5<-m0.5[,-2]
+df1<-read.table('node_1.csv', header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+m1<-as.data.frame(t(apply(as.matrix(df1),1,sort)), stringsAsFactors=FALSE)
+m1<-m1[,-2]
+df2<-read.table('node_2.csv', header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+m2<-as.data.frame(t(apply(as.matrix(df2),1,sort)), stringsAsFactors=FALSE)
+m2<-m2[,-2]
+df5<-read.table('node_5.csv', header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+m5<-as.data.frame(t(apply(as.matrix(df5),1,sort)), stringsAsFactors=FALSE)
+m5<-m5[,-2]
+
+#the intersection between two networks
+#0.1 can be replaced by 0.2, 0.25, 0.3, 0.5, 1, 2 and 5
+intersection<-intersect(m0, m0.1)
+length(intersect(m0, m0.1))
+length(m0)
+length(m1)
+
+input <- c(
+  "0-cutoff"=16602,
+  "0.1-cutoff"=14655, 
+  "0.2-cutoff"=13411,
+  "0.25-cutoff"=13068,
+  "0.3-cutoff"=12756,
+  "0.5-cutoff"=11895,
+  "1-cutoff"=10680,
+  "2-cutoff"=9439,
+  "5-cutoff"=7561,
+  #the intersection between two networks
+  "0-cutoff&0.1-cutoff"=14655, 
+  "0-cutoff&0.2-cutoff"=13411, 
+  "0-cutoff&0.25-cutoff"=13068,
+  "0-cutoff&0.3-cutoff"=12756,
+  "0-cutoff&0.5-cutoff"=11895, 
+  "0-cutoff&1-cutoff"=10680, 
+  "0-cutoff&2-cutoff"=9439, 
+  "0-cutoff&5-cutoff"=7561,  
+  "0.1-cutoff&0.2-cutoff"=13411
+)
+data <- fromExpression(input)
+upset(data,nsets = 9)
+
+
+#comparing the difference between all cut-offs and no-cutoff in the aspect of nodes
+#setdiff() returns difference between the two collections
+length(setdiff (m0,m0.1))
+length(setdiff (m0.1,m0.2))
+length(setdiff (m0.2,m0.25))
+length(setdiff (m0.25,m0.3))
+length(setdiff (m0.3,m0.5))
+length(setdiff (m0.5,m1))
+length(setdiff (m1,m2))
+length(setdiff (m2,m5))
+install.packages("UpSetR")
+library(UpSetR)
+input <- c(
+  "0-cutoff"=16602,
+  "0.1-cutoff"=14655, 
+  "0.2-cutoff"=13411,
+  "0.25-cutoff"=13068,
+  "0.3-cutoff"=12756,
+  "0.5-cutoff"=11895,
+  "1-cutoff"=10680,
+  "2-cutoff"=9439,
+  "5-cutoff"=7561,
+  #the difference between two networks
+  "0-cutoff&0.1-cutoff"=1947, 
+  "0.1-cutoff&0.2-cutoff"=1244, 
+  "0.2-cutoff&0.25-cutoff"=343,
+  "0.25-cutoff&0.3-cutoff"=312,
+  "0.3-cutoff&0.5-cutoff"=861,
+  "0.5-cutoff&1-cutoff"=1215,
+  "1-cutoff&2-cutoff"=1241,
+  "2-cutoff&5-cutoff"=1878
+)
+data <- fromExpression(input)
+upset(data, nsets = 9,mainbar.y.label = "Set and 'Loss' Sizes")
+
+
+
+
+##loop for calculating precision and recall between predicted network at each cutoff and string networks##
+data<-read.table(header=T, sep="\t", "string_medium_confidence.tsv")
+m2<-as.data.frame(t(apply(as.matrix(data),1,sort)), stringsAsFactors=FALSE)
+cutoffs<-c(0, 0.1, 0.2, 0.25, 0.3, 0.5, 1, 2, 5)
+for (cut in cutoffs) {
+  filename=paste(sep="", "edgelist_", cut, ".csv")
+  df1<-read.table(filename, header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+  m1<-as.data.frame(t(apply(as.matrix(df1),1,sort)), stringsAsFactors=FALSE)
+  #true positive
+  TP<-length(intersect(m1, m2)[,1])
+  a<-length(m1[,1])
+  #false positive
+  FP=a-TP
+  b<-length(m2[,1])
+  #false nagetive
+  FN=b-TP
+  Precision=TP/(TP+FP)
+  Recall=TP/(TP+FN)
+  print(Precision)
+  print(Recall)
+}
+
+data<-read.table(header=T, sep="\t", "string_high_confidence.tsv")
+m2<-as.data.frame(t(apply(as.matrix(data),1,sort)), stringsAsFactors=FALSE)
+cutoffs<-c(0, 0.1, 0.2, 0.25, 0.3, 0.5, 1, 2, 5)
+for (cut in cutoffs) {
+  filename=paste(sep="", "edgelist_", cut, ".csv")
+  df1<-read.table(filename, header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+  m1<-as.data.frame(t(apply(as.matrix(df1),1,sort)), stringsAsFactors=FALSE)
+  TP<-length(intersect(m1, m2)[,1])
+  a<-length(m1[,1])
+  FP=a-TP
+  b<-length(m2[,1])
+  FN=b-TP
+  Precision=TP/(TP+FP)
+  Recall=TP/(TP+FN)
+  print(Precision)
+  print(Recall)
+}
+
+
+
+
+##create Precision-Recall curves##
+#data is the precision and recall between predicted network at each cutoff and string networks
+data<-read.table('string_high_confidence_PRdata.txt',header=T)
+data
+library(ggplot2)
+ggplot(data, aes(x = Recall, y = Precision)) +
+  geom_point()+
+  geom_line()
+
+data<-read.table('string_medium_confidence_PRdata.txt',header=T)
+data
+library(ggplot2)
+ggplot(data, aes(x = Recall, y = Precision)) +
+  geom_point()+
+  geom_line()
+
+
+
+
+##CPM normalized values##
+library(beam)
+library(limma)
+library(edgeR)
+cutoffs<-c(0, 0.1, 0.2, 0.25, 0.3, 0.5, 1, 2, 5)
+for (cut in cutoffs) {
+  seqdata <- read.table("Bladder_RNA-seq_STAR_count_data_NextSeq_Samp_only.txt", header=TRUE, sep="	", row.names=1)
+  countdata <- seqdata
+  #countdata[cpm(countdata)<=0.1]=0 <- I change this, see line below
+  countdata[cpm(countdata)<=cut]=0
+  data<-countdata[which(rowSums(countdata==0)==0),]
+  data<-cpm(data)
+  #write.csv(x = data,file = "data.csv") <- I change here as well, I want to have the filename to contain the cutoff I'm at. See 2 lines below
+  filename=paste(sep="", cut, "_", "data_cpm.csv")
+  write.csv(x = data,file = filename)
+  
+  data2<-read.table(filename, header=T, sep=",", row.names=1)
+  matrix<-lightbeam(t(as.matrix(data2)), thres = 0.1, method = "holm", verbose=TRUE)
+  net=graph_from_adjacency_matrix(matrix, diag=FALSE, weighted=TRUE)
+  filename=paste(sep="", cut, "_", "graph_cpm.graphml")
+  write_graph(net,'filename.graphml', 'graphml')
+  
+  edgelist<- as_edgelist(net, names = TRUE)
+  filename2=paste(sep="", "edgelist_",cut, "cpm.csv")
+  write.table(file=filename2, edgelist)
+}
+
+data<-read.table(header=T, sep="\t", "string_medium_confidence.tsv")
+m2<-as.data.frame(t(apply(as.matrix(data),1,sort)), stringsAsFactors=FALSE)
+cutoffs<-c(0.1, 0.2, 0.25, 0.3, 0.5, 1, 2, 5)
+for (cut in cutoffs) {
+  filename=paste(sep="", "edgelist_", cut, "cpm.csv")
+  df1<-read.table(filename, header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+  m1<-as.data.frame(t(apply(as.matrix(df1),1,sort)), stringsAsFactors=FALSE)
+  TP<-length(intersect(m1, m2)[,1])
+  a<-length(m1[,1])
+  FP=a-TP
+  b<-length(m2[,1])
+  FN=b-TP
+  Precision=TP/(TP+FP)
+  Recall=TP/(TP+FN)
+  print(Precision)
+  print(Recall)
+}
+
+data<-read.table(header=T, sep="\t", "string_high_confidence.tsv")
+m2<-as.data.frame(t(apply(as.matrix(data),1,sort)), stringsAsFactors=FALSE)
+cutoffs<-c(0.1, 0.2, 0.25, 0.3, 0.5, 1, 2, 5)
+for (cut in cutoffs) {
+  filename=paste(sep="", "edgelist_", cut, "cpm.csv")
+  df1<-read.table(filename, header=T, sep=" ", row.names=1, stringsAsFactors=FALSE)
+  m1<-as.data.frame(t(apply(as.matrix(df1),1,sort)), stringsAsFactors=FALSE)
+  TP<-length(intersect(m1, m2)[,1])
+  a<-length(m1[,1])
+  FP=a-TP
+  b<-length(m2[,1])
+  FN=b-TP
+  Precision=TP/(TP+FP)
+  Recall=TP/(TP+FN)
+  print(Precision)
+  print(Recall)
+}
+
+
+
+
+##Compare two kinds of PR curves on the same picture##
+# medium confidence string network
+data1<-read.table('string_medium_confidence_cpm.txt',header=T)
+y1<-data1[,1]
+x1<-data1[,2]
+library(ggplot2)
+
+data3<-read.table('string_medium_confidence_PRdata.txt',header=T)
+y3<-data3[,1]
+x3<-data3[,2]
+
+# Create a first line
+plot(x1, y1, ylim=range(c(y1,y3)),xlim=range(c(x1,x3)),type = "b", 
+     col = "red", xlab = "Recall", ylab = "Precision")
+# Add a second line
+lines(x3, y3, pch = 18, col = "blue", type = "b", lty = 2)
+# Add a legend to the plot
+legend("topright", legend=c("CPM", "PR"),
+       col=c("red", "blue"), lty = 1:2, cex=0.8)
+
+
+# high confidence string network
+data1<-read.table('string_high_confidence_cpm.txt',header=T)
+y1<-data1[,1]
+x1<-data1[,2]
+library(ggplot2)
+
+data3<-read.table('string_high_confidence_PRdata.txt',header=T)
+y3<-data3[,1]
+x3<-data3[,2]
+
+# Create a first line
+plot(x1, y1, ylim=range(c(y1,y3)),xlim=range(c(x1,x3)),type = "b", 
+     col = "red", xlab = "Recall", ylab = "Precision")
+# Add a second line
+lines(x3, y3, pch = 18, col = "blue", type = "b", lty = 2)
+# Add a legend to the plot
+legend("topright", legend=c("CPM", "PR"),
+       col=c("red", "blue"), lty = 1:2, cex=0.8)
