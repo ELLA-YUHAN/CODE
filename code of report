@@ -1,0 +1,44 @@
+#plot a density graph
+# Libraries
+install.packages("ggplot2")
+library(ggplot2)
+install.packages("hrbrthemes")
+library(hrbrthemes)
+install.packages("dplyr")
+library(dplyr)
+install.packages("tidyr")
+library(tidyr)
+install.packages("viridis")
+library(viridis)
+
+# read the data into R
+seqdata <- read.delim("Bladder_RNA-seq_STAR_count_data_NextSeq_Samp_only.txt", stringsAsFactors = FALSE)
+
+#format the data
+#the first column has the gene id
+#the remaining columns contain the number of reads aligning to the gene in each experimental sample. 
+# Remove first columns from seqdata
+countdata <- seqdata[,-1]
+# Store GeneID as rownames
+rownames(countdata) <- seqdata[,1]
+head(countdata)
+dim(countdata)
+
+#filtering to remove lowly expressed genes
+#calculate average counts per million (CPMs)，and have at least 100 counts per million 
+#use the cpm function from the edgeR library
+myCPM <- cpm(countdata)
+#convert matrix to data.frame
+myCPM <- as.data.frame(myCPM)
+head(myCPM)
+#concatenate all samples into one column
+myCPM<-pivot_longer(myCPM, starts_with("B"))
+View(myCPM)
+
+#create a density plot
+p1=ggplot(data = myCPM, aes(x = value, y = name, fill=name), lwd=0.5) +
+  geom_density_ridges(scale = 0.9,bandwidth=0.01)+
+  guides(fill=FALSE)+scale_x_log10()
+p1
+ggsave(filename="sample.pdf", plot=p1,
+       height=50, width=30, units="cm")  
